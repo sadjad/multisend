@@ -78,11 +78,9 @@ private:
 
   bool _printing;
 
-  bool link_is_on_ { false };
-  std::exponential_distribution<> on_process_;
-  std::exponential_distribution<> off_process_;
+  bool link_is_on_ { true };
   uint64_t next_switch_time_;
-  default_random_engine prng_;
+  uint64_t loss_length_;
   
   static const int queue_limit_in_packets = 256;
 
@@ -93,7 +91,7 @@ private:
   DelayQueue & operator=( const DelayQueue & other ) = delete;
   
 public:
-  DelayQueue( FILE * s_output, const string & s_name, const uint64_t s_ms_delay, const string filename, const uint64_t base_timestamp, const float loss_rate, const double mean_off_seconds, const double mean_on_seconds );
+  DelayQueue( FILE * s_output, const string & s_name, const uint64_t s_ms_delay, const string filename, const uint64_t base_timestamp, const double loss_rate, const uint64_t loss_start, const uint64_t loss_length );
 
   int wait_time( void );
   vector< string > read( void );
@@ -101,7 +99,7 @@ public:
   void schedule_from_file( const uint64_t base_timestamp );
 };
 
-DelayQueue::DelayQueue( FILE * s_output, const string & s_name, const uint64_t s_ms_delay, const string filename, const uint64_t base_timestamp, const float loss_rate, const double mean_off_seconds, const double mean_on_seconds )
+DelayQueue::DelayQueue( FILE * s_output, const string & s_name, const uint64_t s_ms_delay, const string filename, const uint64_t base_timestamp, const double loss_rate, const uint64_t loss_start, const uint64_t loss_length )
   : _output( s_output ),
     _name( s_name ),
     _delay(),
@@ -120,10 +118,8 @@ DelayQueue::DelayQueue( FILE * s_output, const string & s_name, const uint64_t s
     _packets_dropped( 0 ),
     _file_name( filename ),
     _printing( false ),
-    on_process_( 1.0 / (1000.0 * mean_off_seconds) ),
-    off_process_( 1.0 / (1000.0 * mean_on_seconds) ),
-    next_switch_time_( base_timestamp ),
-    prng_( random_device()() )
+    next_switch_time_( loss_start ),
+    loss_length_( loss_length )
 {
   /* Read schedule from file */
   schedule_from_file( base_timestamp );
@@ -133,7 +129,7 @@ DelayQueue::DelayQueue( FILE * s_output, const string & s_name, const uint64_t s
   fprintf( _output, "# Initialized %s queue with %d services.\n", filename.c_str(), (int)_schedule.size() );
   fprintf( _output, "# Direction: %s\n", _name.c_str() );
   fprintf( _output, "# base timestamp: %lu\n", base_timestamp );
-  fprintf( _output, "# mean off time: %.1f seconds, mean on time: %.1f seconds\n", mean_off_seconds, mean_on_seconds );
+  fprintf( _output, "# loss at: %lu ms, for %lu ms\n", loss_start, loss_length );
 }
 
 void DelayQueue::schedule_from_file( const uint64_t base_timestamp ) 
@@ -266,8 +262,14 @@ void DelayQueue::tick( void )
       link_is_on_ = true;
     }
 
-    /* worried about integer overflow when mean time = 0 */
-    next_switch_time_ += bound( (link_is_on_ ? off_process_ : on_process_)( prng_ ) );
+    if ( not link_is_on_ ) {
+      /* we just turned off this link, so let's turn it back on in now + loss_length */
+      next_switch_time_ = now + loss_length_;
+    }
+    else {
+      /* okay, the loss has happened and we don't need to turn the link off again */
+      next_switch_time_ = numeric_limits<uint64_t>::max();
+    }
   }
   
   /* If the schedule is empty, repopulate it */
@@ -409,16 +411,16 @@ int main( int argc, char *argv[] )
   if (argc >= 8)
     down_output = fopen(argv[7], "w");
 
-  double mean_off_seconds = 0;
-  double mean_on_seconds = 1000;
+  uint64_t loss_start = 0;
+  uint64_t loss_length = 0;
 
   if ( argc == 9 ) {
     throw std::runtime_error( "invalid number of arguments" );
   }
   
   if ( argc == 10 ) {
-    mean_off_seconds = atof( argv[ 8 ] );
-    mean_on_seconds = atof( argv[ 9 ] );
+    loss_start = atof( argv[ 8 ] );
+    loss_length = atof( argv[ 9 ] );
   }
 
   if ( argc > 10 ) {
@@ -427,8 +429,8 @@ int main( int argc, char *argv[] )
 
   /* Read in schedule */
   uint64_t now = timestamp();
-  DelayQueue uplink( up_output, "uplink", 20, up_filename, now , loss_rate, 0.0, 1000.0 );
-  DelayQueue downlink( down_output, "downlink", 20, down_filename, now , loss_rate, mean_off_seconds, mean_on_seconds );
+  DelayQueue uplink( up_output, "uplink", 20, up_filename, now, loss_rate, now + loss_start, loss_length );
+  DelayQueue downlink( down_output, "downlink", 20, down_filename, now, loss_rate, now + loss_start, loss_length );
 
   Select &sel = Select::get_instance();
   sel.add_fd( internet_side.fd() );
