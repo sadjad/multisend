@@ -42,7 +42,7 @@ private:
   public:
     int bytes_earned;
     DelayedPacket packet;
-    
+
     PartialPacket( int s_b_e, const DelayedPacket & s_packet ) : bytes_earned( s_b_e ), packet( s_packet ) {}
   };
 
@@ -81,7 +81,7 @@ private:
   bool link_is_on_ { true };
   uint64_t next_switch_time_;
   uint64_t loss_length_;
-  
+
   static const int queue_limit_in_packets = 256;
 
   void tick( void );
@@ -89,7 +89,7 @@ private:
   /* forbid copies */
   DelayQueue( const DelayQueue & other ) = delete;
   DelayQueue & operator=( const DelayQueue & other ) = delete;
-  
+
 public:
   DelayQueue( FILE * s_output, const string & s_name, const uint64_t s_ms_delay, const string filename, const uint64_t base_timestamp, const double loss_rate, const uint64_t loss_start, const uint64_t loss_length );
 
@@ -132,7 +132,7 @@ DelayQueue::DelayQueue( FILE * s_output, const string & s_name, const uint64_t s
   fprintf( _output, "# loss at: %lu ms, for %lu ms\n", loss_start, loss_length );
 }
 
-void DelayQueue::schedule_from_file( const uint64_t base_timestamp ) 
+void DelayQueue::schedule_from_file( const uint64_t base_timestamp )
 {
   FILE *f = fopen( _file_name.c_str(), "r" );
   if ( f == NULL ) {
@@ -199,15 +199,14 @@ void DelayQueue::write( const string & packet )
   float r= rand()/(float)RAND_MAX;
   _packets_added++;
 
-  if ( !link_is_on_ ) {
-    /* drop the packet */
+  /* if ( !link_is_on_ ) {
     _packets_dropped++;
     uint64_t now( timestamp() );
     fprintf( _output, "# %lu + %lu (outage)\n",
-	     convert_timestamp( now ),
-	     packet.size() );
+       convert_timestamp( now ),
+       packet.size() );
     return;
-  }
+  } */
 
   if (r < _loss_rate) {
    _packets_dropped++;
@@ -219,8 +218,8 @@ void DelayQueue::write( const string & packet )
 
     if ( _delay.size() >= queue_limit_in_packets ) {
       fprintf( _output, "# %lu + %lu (dropped)\n",
-	       convert_timestamp( now ),
-	       packet.size() );
+         convert_timestamp( now ),
+         packet.size() );
 
       return; /* drop the packet */
     }
@@ -229,9 +228,9 @@ void DelayQueue::write( const string & packet )
     _delay.push( p );
 
     fprintf( _output, "%lu + %lu\n",
-	     convert_timestamp( now ),
-	     packet.size() );
-    
+       convert_timestamp( now ),
+       packet.size() );
+
     _queued_bytes=_queued_bytes+packet.size();
   }
 }
@@ -254,11 +253,11 @@ void DelayQueue::tick( void )
     /* switch */
     if ( link_is_on_ ) {
       fprintf( _output, "# %lu switching OFF\n",
-	       convert_timestamp( now ) );
+         convert_timestamp( now ) );
       link_is_on_ = false;
     } else {
       fprintf( _output, "# %lu switching ON\n",
-	       convert_timestamp( now ) );
+         convert_timestamp( now ) );
       link_is_on_ = true;
     }
 
@@ -271,7 +270,7 @@ void DelayQueue::tick( void )
       next_switch_time_ = numeric_limits<uint64_t>::max();
     }
   }
-  
+
   /* If the schedule is empty, repopulate it */
   if ( _schedule.empty() ) {
     schedule_from_file( now );
@@ -279,14 +278,14 @@ void DelayQueue::tick( void )
 
   /* move packets from end of delay to PDP */
   while ( (!_delay.empty())
-	  && (_delay.front().release_time <= now) ) {
+    && (_delay.front().release_time <= now) ) {
     _pdp.push( _delay.front() );
     _delay.pop();
   }
 
   /* execute packet delivery schedule */
   while ( (!_schedule.empty())
-	  && (_schedule.front() <= now) ) {
+    && (_schedule.front() <= now) ) {
     /* grab a PDO */
     const uint64_t pdo_time = _schedule.front();
     _schedule.pop();
@@ -298,82 +297,98 @@ void DelayQueue::tick( void )
     /* execute limbo queue first */
     if ( !_limbo.empty() ) {
       if ( _limbo.front().bytes_earned + bytes_to_play_with >= (int)_limbo.front().packet.contents.size() ) {
-	/* deliver packet */
-	_total_bytes += _limbo.front().packet.contents.size();
-	_used_bytes += _limbo.front().packet.contents.size();
+  /* deliver packet */
+  _total_bytes += _limbo.front().packet.contents.size();
+  _used_bytes += _limbo.front().packet.contents.size();
 
-	/*
-	if ( _printing ) {
-	  printf( "%s %lu delivery %d %lu leftover\n", _name.c_str(), convert_timestamp( pdo_time ), int(pdo_time - _limbo.front().packet.entry_time), _limbo.front().packet.contents.size() );
-	}
-	*/
-	/* new-style output (mahimahi-style) */
-	fprintf( _output, "%lu - %lu %d\n",
-		 convert_timestamp( pdo_time ),
-		 _limbo.front().packet.contents.size(),
-		 int(pdo_time - _limbo.front().packet.entry_time) );
+  /*
+  if ( _printing ) {
+    printf( "%s %lu delivery %d %lu leftover\n", _name.c_str(), convert_timestamp( pdo_time ), int(pdo_time - _limbo.front().packet.entry_time), _limbo.front().packet.contents.size() );
+  }
+  */
+  if ( link_is_on_ ) {
+    /* new-style output (mahimahi-style) */
+    fprintf( _output, "%lu - %lu %d\n",
+       convert_timestamp( pdo_time ),
+       _limbo.front().packet.contents.size(),
+       int(pdo_time - _limbo.front().packet.entry_time) );
 
-	_delivered.push_back( _limbo.front().packet.contents );
-	bytes_to_play_with -= (_limbo.front().packet.contents.size() - _limbo.front().bytes_earned);
-	assert( bytes_to_play_with >= 0 );
-	_limbo.pop();
-	assert( _limbo.empty() );
+     _delivered.push_back( _limbo.front().packet.contents );
+   }
+   else {
+     fprintf( _output, "# %lu - %lu (outage)\n",
+              convert_timestamp( pdo_time ),
+              _limbo.front().packet.contents.size() );
+   }
+
+  bytes_to_play_with -= (_limbo.front().packet.contents.size() - _limbo.front().bytes_earned);
+  assert( bytes_to_play_with >= 0 );
+  _limbo.pop();
+  assert( _limbo.empty() );
       } else {
-	_limbo.front().bytes_earned += bytes_to_play_with;
-	bytes_to_play_with = 0;
-	assert( _limbo.front().bytes_earned < (int)_limbo.front().packet.contents.size() );
+  _limbo.front().bytes_earned += bytes_to_play_with;
+  bytes_to_play_with = 0;
+  assert( _limbo.front().bytes_earned < (int)_limbo.front().packet.contents.size() );
       }
     }
-    
+
     /* execute regular queue */
     while ( bytes_to_play_with > 0 ) {
       assert( _limbo.empty() );
 
       /* will this be an underflow? */
       if ( _pdp.empty() ) {
-	/* underflow */
-	/*
-	if ( _printing ) {
-	  printf( "%s %lu underflow %d\n", _name.c_str(), convert_timestamp( pdo_time ), bytes_to_play_with );
-	}
-	*/
-	_total_bytes += bytes_to_play_with;
-	bytes_to_play_with = 0;
+  /* underflow */
+  /*
+  if ( _printing ) {
+    printf( "%s %lu underflow %d\n", _name.c_str(), convert_timestamp( pdo_time ), bytes_to_play_with );
+  }
+  */
+  _total_bytes += bytes_to_play_with;
+  bytes_to_play_with = 0;
       } else {
-	/* dequeue whole and/or partial packet */
-	DelayedPacket packet = _pdp.front();
-	_pdp.pop();
-	if ( bytes_to_play_with >= (int)packet.contents.size() ) {
-	  /* deliver whole packet */
-	  _total_bytes += packet.contents.size();
-	  _used_bytes += packet.contents.size();
+  /* dequeue whole and/or partial packet */
+  DelayedPacket packet = _pdp.front();
+  _pdp.pop();
+  if ( bytes_to_play_with >= (int)packet.contents.size() ) {
+    /* deliver whole packet */
+    _total_bytes += packet.contents.size();
+    _used_bytes += packet.contents.size();
 
-	  /*
-	  if ( _printing ) {
-	    printf( "%s %lu delivery %d %lu\n", _name.c_str(), convert_timestamp( pdo_time ), int(pdo_time - packet.entry_time), packet.contents.size() );
-	  }
-	  */
+    /*
+    if ( _printing ) {
+      printf( "%s %lu delivery %d %lu\n", _name.c_str(), convert_timestamp( pdo_time ), int(pdo_time - packet.entry_time), packet.contents.size() );
+    }
+    */
 
-	  /* new-style output (mahimahi-style) */
-	  fprintf( _output, "%lu - %lu %d\n",
-		   convert_timestamp( pdo_time ),
-		   packet.contents.size(),
-		   int(pdo_time - packet.entry_time) );
-	  
-	  _delivered.push_back( packet.contents );
-	  bytes_to_play_with -= packet.contents.size();
-	} else {
-	  /* put packet in limbo */
-	  assert( _limbo.empty() );
+    if ( link_is_on_ ) {
+      /* new-style output (mahimahi-style) */
+      fprintf( _output, "%lu - %lu %d\n",
+         convert_timestamp( pdo_time ),
+         packet.contents.size(),
+         int(pdo_time - packet.entry_time) );
 
-	  assert( bytes_to_play_with < (int)packet.contents.size() );
+       _delivered.push_back( packet.contents );
+     }
+     else {
+       fprintf( _output, "# %lu - %lu (outage)\n",
+                convert_timestamp( now ),
+                packet.contents.size() );
+     }
 
-	  PartialPacket limbo_packet( bytes_to_play_with, packet );
-	  
-	  _limbo.push( limbo_packet );
-	  bytes_to_play_with -= _limbo.front().bytes_earned;
-	  assert( bytes_to_play_with == 0 );
-	}
+    bytes_to_play_with -= packet.contents.size();
+  } else {
+    /* put packet in limbo */
+    assert( _limbo.empty() );
+
+    assert( bytes_to_play_with < (int)packet.contents.size() );
+
+    PartialPacket limbo_packet( bytes_to_play_with, packet );
+
+    _limbo.push( limbo_packet );
+    bytes_to_play_with -= _limbo.front().bytes_earned;
+    assert( bytes_to_play_with == 0 );
+  }
       }
     }
   }
@@ -407,7 +422,7 @@ int main( int argc, char *argv[] )
   FILE* up_output = stdout, *down_output = stderr;
   if (argc >= 7)
     up_output = fopen(argv[6], "w");
-  
+
   if (argc >= 8)
     down_output = fopen(argv[7], "w");
 
@@ -417,7 +432,7 @@ int main( int argc, char *argv[] )
   if ( argc == 9 ) {
     throw std::runtime_error( "invalid number of arguments" );
   }
-  
+
   if ( argc == 10 ) {
     loss_start = atof( argv[ 8 ] );
     loss_length = atof( argv[ 9 ] );
@@ -446,13 +461,13 @@ int main( int argc, char *argv[] )
 
     if ( sel.read( client_side.fd() ) ) {
       for ( const auto & it : client_side.recv_raw() ) {
-	uplink.write( it );
+  uplink.write( it );
       }
     }
 
     if ( sel.read( internet_side.fd() ) ) {
       for ( const auto & it : internet_side.recv_raw() ) {
-	downlink.write( it );
+  downlink.write( it );
       }
     }
 
