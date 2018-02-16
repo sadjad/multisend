@@ -184,38 +184,38 @@ vector< string > DelayQueue::read( void )
 
 void DelayQueue::write( const string & packet )
 {
-  float r= rand()/(float)RAND_MAX;
   _packets_added++;
-  if (r < _loss_rate) {
+  /* if (r < _loss_rate) {
    _packets_dropped++;
    fprintf(stderr, "# %s , Stochastic drop of packet, _packets_added so far %d , _packets_dropped %d , drop rate %f \n",
                   _name.c_str(), _packets_added,_packets_dropped , (float)_packets_dropped/(float) _packets_added );
   }
-  else {
-    uint64_t now( timestamp() );
+  else { */
 
-    if ( _delay.size() >= queue_limit_in_packets ) {
-      fprintf( _output, "# %lu + %lu (dropped)\n",
-	       convert_timestamp( now ),
-	       packet.size() );
+  uint64_t now( timestamp() );
 
-      return; /* drop the packet */
-    }
+  if ( _delay.size() >= queue_limit_in_packets ) {
+    fprintf( _output, "# %lu + %lu (dropped)\n",
+       convert_timestamp( now ),
+       packet.size() );
 
-    DelayedPacket p( now, now + _ms_delay, packet );
-    _delay.push( p );
-
-    fprintf( _output, "%lu + %lu\n",
-	     convert_timestamp( now ),
-	     packet.size() );
-
-    _queued_bytes=_queued_bytes+packet.size();
+    return; /* drop the packet */
   }
+
+  DelayedPacket p( now, now + _ms_delay, packet );
+  _delay.push( p );
+
+  fprintf( _output, "%lu + %lu\n",
+     convert_timestamp( now ),
+     packet.size() );
+
+  _queued_bytes=_queued_bytes+packet.size();
 }
 
 void DelayQueue::tick( void )
 {
   uint64_t now = timestamp();
+  float r = rand() / ( float )RAND_MAX;
 
   /* If the schedule is empty, repopulate it */
   if ( _schedule.empty() ) {
@@ -253,12 +253,21 @@ void DelayQueue::tick( void )
 	}
 	*/
 	/* new-style output (mahimahi-style) */
-	fprintf( _output, "%lu - %lu %d\n",
-		 convert_timestamp( pdo_time ),
-		 _limbo.front().packet.contents.size(),
-		 int(pdo_time - _limbo.front().packet.entry_time) );
 
-	_delivered.push_back( _limbo.front().packet.contents );
+  if ( r >= _loss_rate ) {
+    fprintf( _output, "%lu - %lu %d\n",
+             convert_timestamp( pdo_time ),
+             _limbo.front().packet.contents.size(),
+             int(pdo_time - _limbo.front().packet.entry_time) );
+
+		_delivered.push_back( _limbo.front().packet.contents );
+  }
+  else {
+    fprintf( _output, "# %lu - %lu (outage)\n",
+             convert_timestamp( pdo_time ),
+             _limbo.front().packet.contents.size() );
+  }
+
 	bytes_to_play_with -= (_limbo.front().packet.contents.size() - _limbo.front().bytes_earned);
 	assert( bytes_to_play_with >= 0 );
 	_limbo.pop();
@@ -300,12 +309,20 @@ void DelayQueue::tick( void )
 	  */
 
 	  /* new-style output (mahimahi-style) */
-	  fprintf( _output, "%lu - %lu %d\n",
-		   convert_timestamp( pdo_time ),
-		   packet.contents.size(),
-		   int(pdo_time - packet.entry_time) );
+    if ( r >= _loss_rate ) {
+  	  fprintf( _output, "%lu - %lu %d\n",
+               convert_timestamp( pdo_time ),
+               packet.contents.size(),
+               int(pdo_time - packet.entry_time) );
 
-	  _delivered.push_back( packet.contents );
+      _delivered.push_back( packet.contents );
+    }
+    else {
+      fprintf( _output, "# %lu - %lu (outage)\n",
+                convert_timestamp( now ),
+                packet.contents.size() );
+    }
+
 	  bytes_to_play_with -= packet.contents.size();
 	} else {
 	  /* put packet in limbo */
