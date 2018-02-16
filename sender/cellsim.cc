@@ -40,7 +40,7 @@ private:
   public:
     int bytes_earned;
     DelayedPacket packet;
-    
+
     PartialPacket( int s_b_e, const DelayedPacket & s_packet ) : bytes_earned( s_b_e ), packet( s_packet ) {}
   };
 
@@ -74,8 +74,6 @@ private:
   uint32_t _packets_dropped;
   string _file_name;
 
-  bool _printing;
-
   static const int queue_limit_in_packets = 256;
 
   void tick( void );
@@ -83,9 +81,9 @@ private:
   /* forbid copies */
   DelayQueue( const DelayQueue & other ) = delete;
   DelayQueue & operator=( const DelayQueue & other ) = delete;
-  
+
 public:
-  DelayQueue( FILE * s_output, const string & s_name, const uint64_t s_ms_delay, const string filename, const uint64_t base_timestamp, const float loss_rate, bool s_printing = false );
+  DelayQueue( FILE * s_output, const string & s_name, const uint64_t s_ms_delay, const string filename, const uint64_t base_timestamp, const float loss_rate );
 
   int wait_time( void );
   vector< string > read( void );
@@ -93,7 +91,7 @@ public:
   void schedule_from_file( const uint64_t base_timestamp );
 };
 
-DelayQueue::DelayQueue( FILE * s_output, const string & s_name, const uint64_t s_ms_delay, const string filename, const uint64_t base_timestamp, const float loss_rate, bool s_printing )
+DelayQueue::DelayQueue( FILE * s_output, const string & s_name, const uint64_t s_ms_delay, const string filename, const uint64_t base_timestamp, const float loss_rate )
   : _output( s_output ),
     _name( s_name ),
     _delay(),
@@ -110,8 +108,7 @@ DelayQueue::DelayQueue( FILE * s_output, const string & s_name, const uint64_t s
     _base_timestamp( base_timestamp ),
     _packets_added ( 0 ),
     _packets_dropped( 0 ),
-    _file_name( filename ),
-    _printing( s_printing )
+    _file_name( filename )
 {
   /* Read schedule from file */
   schedule_from_file( base_timestamp );
@@ -123,7 +120,7 @@ DelayQueue::DelayQueue( FILE * s_output, const string & s_name, const uint64_t s
   fprintf( _output, "# base timestamp: %lu\n", base_timestamp );
 }
 
-void DelayQueue::schedule_from_file( const uint64_t base_timestamp ) 
+void DelayQueue::schedule_from_file( const uint64_t base_timestamp )
 {
   FILE *f = fopen( _file_name.c_str(), "r" );
   if ( f == NULL ) {
@@ -211,7 +208,7 @@ void DelayQueue::write( const string & packet )
     fprintf( _output, "%lu + %lu\n",
 	     convert_timestamp( now ),
 	     packet.size() );
-    
+
     _queued_bytes=_queued_bytes+packet.size();
   }
 }
@@ -272,7 +269,7 @@ void DelayQueue::tick( void )
 	assert( _limbo.front().bytes_earned < (int)_limbo.front().packet.contents.size() );
       }
     }
-    
+
     /* execute regular queue */
     while ( bytes_to_play_with > 0 ) {
       assert( _limbo.empty() );
@@ -307,7 +304,7 @@ void DelayQueue::tick( void )
 		   convert_timestamp( pdo_time ),
 		   packet.contents.size(),
 		   int(pdo_time - packet.entry_time) );
-	  
+
 	  _delivered.push_back( packet.contents );
 	  bytes_to_play_with -= packet.contents.size();
 	} else {
@@ -317,7 +314,7 @@ void DelayQueue::tick( void )
 	  assert( bytes_to_play_with < (int)packet.contents.size() );
 
 	  PartialPacket limbo_packet( bytes_to_play_with, packet );
-	  
+
 	  _limbo.push( limbo_packet );
 	  bytes_to_play_with -= _limbo.front().bytes_earned;
 	  assert( bytes_to_play_with == 0 );
@@ -337,31 +334,47 @@ void DelayQueue::tick( void )
 
 int main( int argc, char *argv[] )
 {
-  assert( argc >= 6 );
+  if ( argc != 11 ) {
+    return EXIT_FAILURE;
+  }
 
   signal(SIGINT, sigfunc);
   signal(SIGTERM, sigfunc);
   signal(SIGHUP, sigfunc);
 
+  /* Usage
+  cellsim [1]=>up_filename [2]=>down_filename
+          [3]=>uplink_lossrate [4]=>downlink_lossrate
+          [5]=>uplink_delay [6]=>downlink_delay
+          [7]=>internet_side_interface [8]=>client_side_interface
+          [9]=>uplink_log [10]=>downlink_log
+  */
+
   const string up_filename = argv[ 1 ];
   const string down_filename = argv[ 2 ];
-  const double loss_rate = atof( argv[ 3 ] );
 
-  const string internet_side_interface = argv[ 4 ];
-  const string client_side_interface   = argv[ 5 ];
+  const double uplink_loss_rate = atof( argv[ 3 ] );
+  const double downlink_loss_rate = atof( argv[ 4 ] );
+
+  const uint64_t uplink_delay = strtoull( argv[ 5 ], NULL, 0 );
+  const uint64_t downlink_delay = strtoull( argv[ 6 ], NULL, 0 );
+
+  const string internet_side_interface = argv[ 7 ];
+  const string client_side_interface   = argv[ 8 ];
+
+  FILE * up_output = fopen( argv[ 9 ], "w" );
+  FILE * down_output = fopen( argv[ 10 ], "w" );
 
   PacketSocket internet_side( internet_side_interface );
   PacketSocket client_side( client_side_interface );
-  FILE* up_output = stdout, *down_output = stderr;
-  if (argc >= 7)
-    up_output = fopen(argv[6], "w");
-  
-  if (argc >= 8)
-    down_output = fopen(argv[7], "w");
+
   /* Read in schedule */
   uint64_t now = timestamp();
-  DelayQueue uplink( up_output, "uplink", 20, up_filename, now , loss_rate );
-  DelayQueue downlink( down_output, "downlink", 20, down_filename, now , loss_rate, true );
+  DelayQueue uplink( up_output, "uplink", uplink_delay, up_filename, now,
+                     uplink_loss_rate );
+
+  DelayQueue downlink( down_output, "downlink", downlink_delay, down_filename, now,
+                       downlink_loss_rate );
 
   Select &sel = Select::get_instance();
   sel.add_fd( internet_side.fd() );
